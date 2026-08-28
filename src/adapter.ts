@@ -1,10 +1,13 @@
 /** OpenAI Codex adapter assembled from public dsh-llm-pi-ai extension points. */
 
+import { access } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { resolve } from 'node:path'
 import { createModels } from '@earendil-works/pi-ai'
-import type { Context as PiContext, MutableModels, Provider, SimpleStreamOptions } from '@earendil-works/pi-ai'
+import type { AuthContext, Context as PiContext, MutableModels, Provider, SimpleStreamOptions } from '@earendil-works/pi-ai'
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex'
 import { resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
@@ -21,6 +24,17 @@ export function openAICodexModelCatalog(): readonly ModelCatalogEntry[] {
 
 /** Provider idle ceiling used by the composite route. */
 export const OPENAI_CODEX_STREAM_IDLE_TIMEOUT_MS = 300_000
+
+/**
+ * Image request budgets for the hand-built profile below. The profile bypasses
+ * `resolveProfiles`, so these mirror the dsh-llm-pi-ai route defaults
+ * (20 MiB request payload, 2048x2048 pixel budget, 1 MiB per encoded version)
+ * that function would otherwise apply; the published package does not export
+ * the constants.
+ */
+export const OPENAI_CODEX_MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
+export const OPENAI_CODEX_REQUEST_IMAGE_PIXEL_BUDGET = 2048 * 2048
+export const OPENAI_CODEX_REQUEST_IMAGE_MAX_BYTES = 1024 * 1024
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -127,7 +141,11 @@ function requestProvider(provider: Provider, fastMode?: FastModeRegistry): Provi
   }
 }
 
-/** Preserve Harness call purpose until the generic pi-ai adapter reaches the provider. */
+/**
+ * Preserve Harness call purpose through the pi-ai adapter: mark native
+ * compaction calls and migrate legacy replay state on both dispatch entries
+ * (`stream` for direct callers, `prepareCall` for the dsh-llm runtime).
+ */
 class OpenAICodexAdapter extends PiAiAdapter {
   constructor(
     options: ConstructorParameters<typeof PiAiAdapter>[0],
@@ -145,16 +163,58 @@ class OpenAICodexAdapter extends PiAiAdapter {
     return models.filter(model => visible.has(model.id))
   }
 
-  override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+  /**
+   * Wrap one dispatch with the Codex call-scoped state: native compaction
+   * marking for compaction purposes and the legacy replay-state migration.
+   * dsh-llm dispatches through `prepareCall`, so both entry points share it.
+   */
+  private wrapDispatch(
+    options: GenerateOptions,
+    dispatch: (options: GenerateOptions) => AsyncIterable<StreamChunk>,
+  ): AsyncIterable<StreamChunk> {
     const release = options.purpose === 'compaction'
       ? this.responses.enterCompaction(options.sessionId === undefined ? undefined : String(options.sessionId))
       : undefined
-    try {
-      for await (const chunk of super.stream(migrateReplayHistory(options))) yield chunk
-    } finally {
-      release?.()
-    }
+    return (async function* () {
+      try {
+        for await (const chunk of dispatch(migrateReplayHistory(options))) yield chunk
+      } finally {
+        release?.()
+      }
+    })()
   }
+
+  override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    yield* this.wrapDispatch(options, options => super.stream(options))
+  }
+
+  override prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+    return super.prepareCall(provider, model, signal).then(call => ({
+      ...call,
+      stream: (options: GenerateOptions) => this.wrapDispatch(options, options => call.stream(options)),
+    }))
+  }
+}
+
+/**
+ * Ambient lookups for the collections this adapter builds: the process
+ * environment and the host filesystem. The Codex route reaches them only when
+ * the plugin's own store holds no credential; its OAuth flow owns auth
+ * otherwise.
+ */
+const PROCESS_AUTH_CONTEXT: AuthContext = {
+  env: async name => process.env[name],
+  fileExists: async path => {
+    const expanded = path === '~' || path.startsWith('~/')
+      ? resolve(homedir(), path.slice(1).replace(/^\//, ''))
+      : path
+    try {
+      await access(expanded)
+      return true
+    } catch {
+      return false
+    }
+  },
 }
 
 /**
@@ -178,6 +238,9 @@ export function createOpenAICodexAdapter(
     streamIdleTimeoutMs: OPENAI_CODEX_STREAM_IDLE_TIMEOUT_MS,
     retryPolicy: OPENAI_CODEX_RETRY_POLICY,
     configuredMaxTokens: new Map(),
+    maxRequestImageBytes: OPENAI_CODEX_MAX_REQUEST_IMAGE_BYTES,
+    requestImagePixelBudget: OPENAI_CODEX_REQUEST_IMAGE_PIXEL_BUDGET,
+    requestImageMaxBytes: OPENAI_CODEX_REQUEST_IMAGE_MAX_BYTES,
     piProvider: responses.wrap(requestProvider(provider, fastMode)),
   }]])
   const models: MutableModels = createModels({ credentials })
@@ -185,6 +248,7 @@ export function createOpenAICodexAdapter(
   return new OpenAICodexAdapter({
     profiles: () => profiles,
     resolveApiKey: async () => (await models.getAuth(OPENAI_CODEX_PROVIDER))?.auth.apiKey,
+    auth: { credentials, authContext: PROCESS_AUTH_CONTEXT },
     resolveAttachments,
   }, responses, visibleModelIds)
 }
