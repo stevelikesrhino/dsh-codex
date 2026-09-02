@@ -59,7 +59,7 @@ describe('dsh-codex doctor', () => {
       },
     })
     expect(report.compatibility.status).toBe('incompatible')
-    expect(report.hints.join('\n')).toMatch(/pin @earendil-works\/pi-ai to 0\.82\.1/)
+    expect(report.hints.join('\n')).toMatch(/pin @earendil-works\/pi-ai to 0\.84\.4/)
   })
 
   it('reports unknown compatibility without pretending it is supported', async () => {

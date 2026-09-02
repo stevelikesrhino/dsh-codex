@@ -1,8 +1,12 @@
 /** Browser half: OpenAI Codex account management inside dsh Settings. */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -33,7 +37,7 @@ export const name = 'dsh-codex-client'
 export const inject = ['slots', 'locale', 'sessions']
 
 /** Register account copy and the OpenAI Codex settings page. */
-export function apply(ctx: ClientContext): void {
+export function apply(ctx: Context): void {
   const namespace = 'settings.openai-codex'
   ctx.effect(() => ctx.locale.register(namespace, { zh, en }), 'dsh-openai-codex: settings copy')
   const t = ctx.locale.bind(namespace) as OpenAICodexSettingsInjected['t']
@@ -43,7 +47,8 @@ export function apply(ctx: ClientContext): void {
     const key = `${sessionId}:${attachment.attachmentId}`
     const cached = imageUrls.get(key)
     if (cached !== undefined) return cached
-    const session = ctx.sessions.binding(sessionId)?.session
+    const sessions = ctx.sessions as unknown as ISessions
+    const session = sessions.binding(sessionId)?.session
     if (session === undefined) return Promise.reject(new Error(`unknown session ${sessionId}`))
     const pending = session.readAttachment(attachment.attachmentId).then(result => {
       if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)

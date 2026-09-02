@@ -133,7 +133,7 @@ dsh 登录与 Codex CLI／Desktop 相互独立：
 
 ## 兼容性说明
 
-- 本分支面向 DSH `0.1.1-rc.2` 插件表层与 `@earendil-works/pi-ai` `0.82.1`。adapter 会在读取历史时迁移旧版 pi-ai replay envelope，因此升级到 rc.7 后，已有 reasoning／tool 元数据仍可继续使用。它为手工构建的 provider profile 应用 dsh-llm-pi-ai 路由图片预算（20 MiB 请求载荷、2048x2048 像素预算、每编码版本 1 MiB），并同时挂在两个运行时 dispatch 入口（`stream` 与 `prepareCall`）上，使压缩标记与 replay 迁移在 0.1.1-rc.2 的 dispatch 变更后继续生效。
+- 本分支面向 DSH `0.1.2-alpha.4` 插件表层与 `@earendil-works/pi-ai` `0.84.4`。adapter 会在读取历史时迁移旧版 pi-ai replay envelope，因此升级到 rc.7 后，已有 reasoning／tool 元数据仍可继续使用。它为手工构建的 provider profile 应用 dsh-llm-pi-ai 路由图片预算（20 MiB 请求载荷、2048x2048 像素预算、每编码版本 1 MiB），并同时挂在两个运行时 dispatch 入口（`stream` 与 `prepareCall`）上，使压缩标记与 replay 迁移在 0.1.2-alpha.4 的 dispatch 变更后继续生效。
 - 插件只使用已发布的 dsh 插件表层，不要求修改版 Harness checkout。单独安装时即可生成附件并保存本地输出。
 - ChatGPT 套餐资格、模型权限、配额及后端行为由 OpenAI 控制，可能发生变化。
 - Codex 端点不执行普通 Responses 的 `max_output_tokens` 字段。压缩可以工作，但该路由无法在服务端落实配置的摘要上限。
