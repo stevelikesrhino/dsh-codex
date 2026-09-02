@@ -8,6 +8,7 @@ Use a ChatGPT subscription in [DeepSeek Harness](https://github.com/deepseek-ai/
 
 - ChatGPT OAuth from the dsh Settings panel or a standalone CLI, with automatic token refresh
 - the Codex GPT catalog, including vision-capable models when the account offers them
+- a live client-side context-window capacity override for dsh's token meter and compaction policy
 - streaming, tool calls, reasoning replay, prompt caching, and dsh compaction through the normal LLM service
 - Codex standalone web search through dsh's existing `web_search` tool
 - optional HTTP(S) URL input added to Harness's existing `read_image` tool
@@ -71,6 +72,20 @@ The same initial subset can be seeded through `models` on the `llm-openai-codex`
 
 The checkboxes and `models` setting control discovery only. A hidden model already stored in an existing session or supplied explicitly remains resolvable, so narrowing the picker does not invalidate older records. Omit `models` to start with the full catalog; an empty list advertises no models.
 
+## Context window
+
+Open **Settings → OpenAI Codex → Context window** to override the client-side capacity in K tokens. For example, enter `512` for 512,000 tokens. Leave the field empty to restore each model's pi-ai catalog default. The saved value applies to every Codex model on its next request and is shown by `/codex config`; an open conversation's meter refreshes after that request.
+
+The initial value can also be seeded in exact tokens:
+
+```yaml
+- id: llm-openai-codex
+  config:
+    contextWindow: 512000
+```
+
+This mirrors Codex CLI's `model_context_window` concept on the Harness side; no context-window field is sent to the Responses endpoint. The resolved capacity drives dsh's context meter, overflow classification, output-token clamping, and automatic-compaction threshold. A smaller value compacts earlier. A larger value does not increase the backend model's real capacity, so unsupported values can still end in a provider overflow error.
+
 ## Images
 
 Image support uses dsh's durable attachment path:
@@ -133,7 +148,7 @@ Keeping the stores separate prevents two clients from racing the same rotating r
 
 ## Compatibility notes
 
-- This branch targets the DSH `0.1.2-alpha.4` plugin surfaces and `@earendil-works/pi-ai` `0.84.4`. The adapter migrates the earlier pi-ai replay envelope while reading history so existing reasoning/tool metadata remains usable after the rc.7 upgrade. It applies the dsh-llm-pi-ai route image budgets (20 MiB request payload, 2048x2048 pixel budget, 1 MiB per encoded version) to its hand-built provider profile, and hooks both runtime dispatch entries (`stream` and `prepareCall`) so compaction marking and replay migration survive the 0.1.2-alpha.4 dispatch change.
+- This branch targets the DSH `0.1.2-alpha.4` plugin surfaces and `@earendil-works/pi-ai` `0.84.4`. The adapter migrates the earlier pi-ai replay envelope while reading history so existing reasoning/tool metadata remains usable after upgrades. It supplies the request-image policy fields required by current dsh runtimes from its hand-built provider profile (Codex's patch-derived pixel budget with a 1 GiB sanity guard, tightened per image at the attachment-store boundary), and hooks both runtime dispatch entries (`stream` and `prepareCall`) so compaction marking and replay migration survive the 0.1.2-alpha.4 dispatch change.
 - The plugin runs on released dsh plugin surfaces and does not require a modified Harness checkout. It can generate attachments and save local output when installed alone.
 - ChatGPT plan eligibility, model access, quotas, and backend behavior are controlled by OpenAI and may change.
 - The Codex endpoint does not enforce the ordinary Responses `max_output_tokens` field. Compaction works, but its configured summary cap cannot be imposed server-side on this route.

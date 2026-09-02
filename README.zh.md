@@ -8,6 +8,7 @@
 
 - 在 dsh 设置面板或独立 CLI 中完成 ChatGPT OAuth 登录，并自动刷新 token
 - Codex GPT 模型目录；账号提供视觉模型时自动声明其图片输入能力
+- 可实时覆盖 dsh 用于上下文用量显示与压缩策略的客户端窗口容量
 - 经标准 LLM 服务运行的流式响应、工具调用、推理回放、提示词缓存与 dsh 压缩
 - 通过 dsh 现有 `web_search` 工具使用 Codex 独立联网搜索
 - 为 Harness 现有 `read_image` 工具增加可选的 HTTP(S) URL 输入
@@ -71,6 +72,20 @@ bundle 会为新建 agent 选择 `openai-codex` / `gpt-5.6-sol`，并选择 Code
 
 复选框与 `models` 设置都只控制模型发现。现有会话已经保存或显式指定的隐藏模型仍可解析，因此收窄选择器不会破坏旧记录。省略 `models` 时初始展示完整目录；空列表表示不展示任何模型。
 
+## 上下文窗口
+
+打开 **设置 → OpenAI Codex → 上下文窗口**，可以用 K tokens 为单位覆盖客户端容量。例如输入 `512` 表示 512,000 tokens；留空会恢复各模型在 pi-ai 目录中的默认值。保存后的值会在下一次请求时应用到全部 Codex 模型，并显示在 `/codex config` 中；已打开会话的用量分母会在该请求后刷新。
+
+也可以在初始配置中填写精确 token 数：
+
+```yaml
+- id: llm-openai-codex
+  config:
+    contextWindow: 512000
+```
+
+该功能在 Harness 一侧对应 Codex CLI 的 `model_context_window` 概念，不会向 Responses 端点发送上下文窗口字段。解析后的容量会直接控制 dsh 的上下文用量分母、溢出判断、输出 token 收缩和自动压缩阈值；较小的值会更早压缩。较大的值不会提高后端模型的真实容量，模型不支持时仍可能返回上下文溢出错误。
+
 ## 图片
 
 图片功能使用 dsh 的持久附件路径：
@@ -133,7 +148,7 @@ dsh 登录与 Codex CLI／Desktop 相互独立：
 
 ## 兼容性说明
 
-- 本分支面向 DSH `0.1.2-alpha.4` 插件表层与 `@earendil-works/pi-ai` `0.84.4`。adapter 会在读取历史时迁移旧版 pi-ai replay envelope，因此升级到 rc.7 后，已有 reasoning／tool 元数据仍可继续使用。它为手工构建的 provider profile 应用 dsh-llm-pi-ai 路由图片预算（20 MiB 请求载荷、2048x2048 像素预算、每编码版本 1 MiB），并同时挂在两个运行时 dispatch 入口（`stream` 与 `prepareCall`）上，使压缩标记与 replay 迁移在 0.1.2-alpha.4 的 dispatch 变更后继续生效。
+- 本分支面向 DSH `0.1.2-alpha.4` 插件表层与 `@earendil-works/pi-ai` `0.84.4`。adapter 会在读取历史时迁移旧版 pi-ai replay envelope，因此升级后已有 reasoning／tool 元数据仍可继续使用。它为手工构建的 provider profile 提供当前 dsh 运行时所需的 request-image 策略字段（Codex 补丁派生的像素预算与 1 GiB 健全性上限，并在 attachment-store 边界逐图收紧），并同时挂在两个运行时 dispatch 入口（`stream` 与 `prepareCall`）上，使压缩标记与 replay 迁移在 0.1.2-alpha.4 的 dispatch 变更后继续生效。
 - 插件只使用已发布的 dsh 插件表层，不要求修改版 Harness checkout。单独安装时即可生成附件并保存本地输出。
 - ChatGPT 套餐资格、模型权限、配额及后端行为由 OpenAI 控制，可能发生变化。
 - Codex 端点不执行普通 Responses 的 `max_output_tokens` 字段。压缩可以工作，但该路由无法在服务端落实配置的摘要上限。

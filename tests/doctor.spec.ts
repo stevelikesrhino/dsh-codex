@@ -54,7 +54,7 @@ describe('dsh-codex doctor', () => {
         packageVersions: {
           '@deepseek-ai/dsh-llm': '0.1.0-rc.7',
           '@deepseek-ai/dsh-llm-pi-ai': '0.1.0-rc.6',
-          '@earendil-works/pi-ai': '0.82.1',
+          '@earendil-works/pi-ai': '0.84.4',
         },
       },
     })

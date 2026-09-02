@@ -70,3 +70,6 @@ minimumReleaseAgeExclude:
   - '@deepseek-ai/dsh-web@0.1.2-alpha.4'
   - '@deepseek-ai/dsh-workspace@0.1.2-alpha.4'
   - '@deepseek-ai/dsh-client-ui-session@0.1.2-alpha.4'
+
+overrides:
+  '@earendil-works/pi-ai': 0.84.4
