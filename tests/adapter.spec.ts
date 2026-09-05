@@ -269,6 +269,50 @@ describe("OpenAI Codex adapter policy", () => {
     });
   });
 
+  it("advertises the plugin-owned GPT-6 Astra model in the settings catalog", () => {
+    expect(
+      openAICodexModelCatalog().find((model) => model.id === "gpt-6-astra")
+    ).toMatchObject({
+      name: "GPT-6 Astra",
+      contextWindow: 272_000,
+    });
+  });
+
+  it("resolves the plugin-owned GPT-6 Astra model with its own capacities", async () => {
+    const adapter = createOpenAICodexAdapter(
+      {} as OpenAICodexCredentialStore,
+      () => undefined,
+      () => ({ useWebSocketContextReuse: false, useNativeCompaction: false })
+    );
+
+    await expect(
+      adapter.resolveModel(OPENAI_CODEX_PROVIDER, "gpt-6-astra")
+    ).resolves.toMatchObject({
+      name: "GPT-6 Astra",
+      inputModalities: ["text", "image"],
+      context: { contextWindow: 272_000 },
+    });
+    const models = await adapter.listModels(OPENAI_CODEX_PROVIDER);
+    expect(models.map((model) => model.id)).toContain("gpt-6-astra");
+  });
+
+  it("applies the context-window override to GPT-6 Astra like other Codex models", async () => {
+    const adapter = createOpenAICodexAdapter(
+      {} as OpenAICodexCredentialStore,
+      () => undefined,
+      () => ({ useWebSocketContextReuse: false, useNativeCompaction: false }),
+      undefined,
+      undefined,
+      () => 512_000
+    );
+
+    await expect(
+      adapter.resolveModel(OPENAI_CODEX_PROVIDER, "gpt-6-astra")
+    ).resolves.toMatchObject({
+      context: { contextWindow: 512_000 },
+    });
+  });
+
   it("advertises the full provider catalog when no model list is configured", async () => {
     const adapter = createOpenAICodexAdapter(
       {} as OpenAICodexCredentialStore,

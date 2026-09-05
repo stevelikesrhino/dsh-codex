@@ -4,6 +4,7 @@ import { createModels } from "@earendil-works/pi-ai";
 import type {
   AuthContext,
   Context as PiContext,
+  Model,
   MutableModels,
   Provider,
   SimpleStreamOptions,
@@ -33,9 +34,74 @@ import type { FastModeRegistry } from "./fast-mode.ts";
 
 const GPT_5_3_CODEX_SPARK = "gpt-5.3-codex-spark";
 
-/** Return a detached copy of the complete pi-ai Codex model catalog. */
+/**
+ * Codex model served by the live pi.dev catalog before the pinned pi-ai
+ * release listed it. Fields mirror the upstream record so a later pi-ai
+ * release can own the same id without changing this overlay's behavior.
+ */
+const GPT_6_ASTRA: Model<"openai-codex-responses"> = {
+  id: "gpt-6-astra",
+  name: "GPT-6 Astra",
+  api: "openai-codex-responses",
+  provider: "openai-codex",
+  baseUrl: "https://chatgpt.com/backend-api",
+  reasoning: true,
+  input: ["text", "image"],
+  cost: {
+    input: 10,
+    output: 50,
+    cacheRead: 1,
+    cacheWrite: 12.5,
+    tiers: [
+      {
+        inputTokensAbove: 272_000,
+        input: 20,
+        output: 75,
+        cacheRead: 2,
+        cacheWrite: 25,
+      },
+    ],
+  },
+  contextWindow: 272_000,
+  maxTokens: 128_000,
+  thinkingLevelMap: {
+    off: null,
+    minimal: "low",
+    low: "low",
+    medium: "medium",
+    high: "high",
+    xhigh: "xhigh",
+    max: "max",
+  },
+  compat: {
+    supportsOpenAIGrammarTools: true,
+    supportsAdditionalTools: true,
+    supportsToolSearch: true,
+  },
+};
+
+/**
+ * Advertise plugin-owned Codex models the pinned pi-ai catalog does not list
+ * yet. The overlay is idempotent: once a pi-ai release lists the same id, the
+ * upstream record wins and this addition becomes a no-op.
+ */
+function withOpenAICodexExtraModels(
+  provider: Provider<"openai-codex-responses">
+): Provider<"openai-codex-responses"> {
+  const getModels = provider.getModels;
+  return {
+    ...provider,
+    getModels() {
+      const models = getModels.call(provider);
+      if (models.some((model) => model.id === GPT_6_ASTRA.id)) return models;
+      return [...models, GPT_6_ASTRA];
+    },
+  };
+}
+
+/** Return a detached copy of the complete Codex model catalog. */
 export function openAICodexModelCatalog(): readonly ModelCatalogEntry[] {
-  return openaiCodexProvider()
+  return withOpenAICodexExtraModels(openaiCodexProvider())
     .getModels()
     .map((model) => ({
       id: model.id,
@@ -400,7 +466,10 @@ export function createOpenAICodexAdapter(
   contextWindow?: () => number | null | undefined,
   overrideSparkContextWindow?: () => boolean | undefined
 ): PiAiAdapter {
-  const provider = requestProvider(openaiCodexProvider(), fastMode);
+  const provider = requestProvider(
+    withOpenAICodexExtraModels(openaiCodexProvider()),
+    fastMode
+  );
   const responses = new OpenAICodexResponseRuntime(responsePreferences);
   const unset = Symbol("unset context window");
   let resolvedContextWindow: number | null | undefined | typeof unset = unset;
