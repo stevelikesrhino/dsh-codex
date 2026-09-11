@@ -54,8 +54,9 @@ export class OpenAICodexService {
   private readonly stopProxyWatch: () => void;
 
   constructor(options: OpenAICodexServiceOptions) {
-    this.credentials = new OpenAICodexCredentialStore(options.credentialFile);
-    this.policy = new ImageToolPolicy(options, options.modelCatalog);
+    const { credentialFile, modelCatalog, ...preferences } = options;
+    this.credentials = new OpenAICodexCredentialStore(credentialFile);
+    this.policy = new ImageToolPolicy(preferences, modelCatalog);
     this.proxy = new OpenAICodexProxyTransport(() =>
       this.policy.proxySnapshot()
     );
