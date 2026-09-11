@@ -37,6 +37,13 @@ export const en = {
   fastModeEnabledTitle:
     "Current: 1.5× speed, with faster quota consumption. Click to switch to Standard speed.",
   fastModeDisabledTitle: "Current: Standard speed. Click to enable 1.5× speed.",
+  fastMode: "Fast Mode",
+  fastModeIntro:
+    "Speed up Codex requests with the provider's priority service tier.",
+  fastModeDefault: "Force 1.5× speed by default",
+  fastModeDefaultHint:
+    "When enabled, every conversation uses 1.5× speed with faster quota consumption, without toggling the per-conversation ⚡ switch.",
+  fastModeSettingsFailed: "Fast Mode settings could not be saved.",
   requestFailed: "The OpenAI Codex account request failed.",
   remoteOriginTitle: "Browser origin is not trusted",
   remoteOriginDescription:
@@ -45,6 +52,26 @@ export const en = {
   remoteOriginCopy: "Copy command",
   remoteOriginCopied: "Copied",
   remoteOriginCopyFailed: "Could not copy the command.",
+  proxy: "Network proxy",
+  proxyIntro:
+    "Choose how this plugin applies a proxy. Changes take effect without restarting dsh.",
+  proxyMode: "Proxy scope",
+  proxyModeOff: "Follow dsh",
+  proxyModeScoped: "Codex only",
+  proxyModeGlobal: "All dsh",
+  proxyModeOffHint:
+    "The plugin does not override networking. Codex still follows any process-wide proxy configured when dsh started.",
+  proxyModeScopedHint:
+    "Codex HTTP requests and OAuth token refresh use this proxy. Initial login and WebSocket transport continue to follow dsh networking.",
+  proxyModeGlobalHint:
+    "Applies this proxy to the whole dsh process, including OAuth. Requests from other plugins are affected too.",
+  proxyUrl: "Proxy URL",
+  proxyUrlPlaceholder: "Use proxy environment variables",
+  proxyUrlHint:
+    "Use an HTTP(S) proxy URL. Leave blank to use DSH_CODEX_PROXY or the standard HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, and NO_PROXY environment variables.",
+  proxySave: "Save proxy",
+  proxySaved: "Proxy settings saved.",
+  proxySettingsFailed: "Proxy settings could not be saved.",
   modelCatalog: "Models shown in the selector",
   modelCatalogIntro:
     "Choose which Codex models appear in model selectors. Existing conversations can continue using a hidden model.",
@@ -143,6 +170,12 @@ export const zh: { [Key in OpenAICodexSettingsKey]: string } = {
   fastModeUnavailableTitle: "此对话暂时无法使用 Fast Mode。",
   fastModeEnabledTitle: "当前：1.5 倍速度，额度消耗更快。点击切换到标准速度",
   fastModeDisabledTitle: "当前：标准速度。点击开启 1.5 倍速度",
+  fastMode: "Fast Mode",
+  fastModeIntro: "通过提供方的 priority service tier 加速 Codex 请求。",
+  fastModeDefault: "默认强制开启 1.5 倍速",
+  fastModeDefaultHint:
+    "开启后所有会话默认使用 1.5 倍速，额度消耗更快，无需逐会话点击 ⚡ 开关。",
+  fastModeSettingsFailed: "无法保存 Fast Mode 设置。",
   requestFailed: "OpenAI Codex 账户请求失败。",
   remoteOriginTitle: "浏览器来源尚未受信任",
   remoteOriginDescription:
@@ -151,6 +184,25 @@ export const zh: { [Key in OpenAICodexSettingsKey]: string } = {
   remoteOriginCopy: "复制命令",
   remoteOriginCopied: "已复制",
   remoteOriginCopyFailed: "无法复制命令。",
+  proxy: "网络代理",
+  proxyIntro: "选择插件应用代理的范围；修改后无需重启 dsh。",
+  proxyMode: "代理范围",
+  proxyModeOff: "跟随 dsh",
+  proxyModeScoped: "仅 Codex",
+  proxyModeGlobal: "整个 dsh",
+  proxyModeOffHint:
+    "插件不覆盖网络设置；如果 dsh 启动时已配置进程级代理，Codex 仍会遵循该策略。",
+  proxyModeScopedHint:
+    "Codex HTTP 请求与 OAuth Token 刷新使用此代理；首次登录和 WebSocket 仍遵循 dsh 的网络策略。",
+  proxyModeGlobalHint:
+    "把此代理应用到整个 dsh 进程，并覆盖 OAuth；其他插件的请求也会受到影响。",
+  proxyUrl: "代理 URL",
+  proxyUrlPlaceholder: "使用代理环境变量",
+  proxyUrlHint:
+    "请输入 HTTP(S) 代理 URL；留空时读取 DSH_CODEX_PROXY，或标准的 HTTP_PROXY、HTTPS_PROXY、ALL_PROXY 与 NO_PROXY 环境变量。",
+  proxySave: "保存代理",
+  proxySaved: "代理设置已保存。",
+  proxySettingsFailed: "无法保存代理设置。",
   modelCatalog: "模型选择器中显示的模型",
   modelCatalogIntro:
     "选择要在模型选择器中显示的 Codex 模型；隐藏模型后，已有会话仍可继续使用。",

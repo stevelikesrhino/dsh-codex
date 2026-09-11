@@ -5,6 +5,11 @@ import type {
 } from "@deepseek-ai/dsh-settings";
 import type { ToolExecution } from "@deepseek-ai/dsh-tools";
 import z from "@deepseek-ai/schemastery";
+import {
+  DEFAULT_PROXY_PREFERENCES,
+  normalizeProxyUrl,
+} from "./proxy.ts";
+import type { ProxyPreferences } from "./proxy.ts";
 import { OPENAI_CODEX_PROVIDER } from "./store.ts";
 
 /** User-controlled image-tool integration. */
@@ -39,6 +44,12 @@ export interface ModelCatalogPreferences {
   models: string[];
 }
 
+/** Fast Mode behavior applied to every Codex session. */
+export interface FastModePreferences {
+  /** Force the priority service tier on all sessions without the per-session toggle. */
+  fastModeDefault: boolean;
+}
+
 /** Browser projection containing both available and currently visible models. */
 export interface ModelCatalogSettings extends ModelCatalogPreferences {
   availableModels: ModelCatalogEntry[];
@@ -49,7 +60,9 @@ interface OpenAICodexPreferences
     ImageToolPreferences,
     ResponseApiPreferences,
     ModelCatalogPreferences,
-    ContextWindowPreferences {
+    ContextWindowPreferences,
+    FastModePreferences,
+    ProxyPreferences {
   /** Migration-only key written by the unreleased store:true experiment. */
   useStatefulResponses: boolean;
 }
@@ -72,6 +85,11 @@ export const DEFAULT_CONTEXT_WINDOW_PREFERENCES: ContextWindowPreferences = {
   overrideSparkContextWindow: false,
 };
 
+/** Keep Fast Mode a per-session opt-in until the owner forces it globally. */
+export const DEFAULT_FAST_MODE_PREFERENCES: FastModePreferences = {
+  fastModeDefault: false,
+};
+
 const NAMESPACE = "openai-codex" as SettingsNamespace;
 
 function preferenceSchema(
@@ -90,7 +108,10 @@ function preferenceSchema(
       ])
       .default(null),
     overrideSparkContextWindow: z.boolean().default(false),
+    proxyMode: z.union(["off", "scoped", "global"] as const).default("off"),
+    proxyUrl: z.string().default(""),
     models: z.array(z.string()).default([...defaultModels]),
+    fastModeDefault: z.boolean().default(false),
   });
 }
 
@@ -99,22 +120,34 @@ export class ImageToolPolicy {
   private current: OpenAICodexPreferences;
   private scope: SettingsScope<OpenAICodexPreferences> | undefined;
   private readonly imageWatchers = new Set<() => void>();
-  private readonly modelCatalog: readonly ModelCatalogEntry[];
+  private readonly proxyWatchers = new Set<() => void>();
+  private readonly resolveModelCatalog: () => readonly ModelCatalogEntry[];
+
+  private get modelCatalog(): readonly ModelCatalogEntry[] {
+    return this.resolveModelCatalog();
+  }
 
   constructor(
     base: Partial<OpenAICodexPreferences> = {},
-    modelCatalog: readonly ModelCatalogEntry[] = []
+    modelCatalog: readonly ModelCatalogEntry[] | (() => readonly ModelCatalogEntry[]) = []
   ) {
-    this.modelCatalog = modelCatalog.map((model) => ({ ...model }));
+    if (typeof modelCatalog === "function") {
+      this.resolveModelCatalog = modelCatalog;
+    } else {
+      const initialCatalog = modelCatalog.map((model) => ({ ...model }));
+      this.resolveModelCatalog = () => initialCatalog;
+    }
     this.current = {
       ...DEFAULT_IMAGE_TOOL_PREFERENCES,
       ...DEFAULT_RESPONSE_API_PREFERENCES,
       ...DEFAULT_CONTEXT_WINDOW_PREFERENCES,
+      ...DEFAULT_FAST_MODE_PREFERENCES,
+      ...DEFAULT_PROXY_PREFERENCES,
       useStatefulResponses: false,
       ...base,
-      models: this.normalizeModels(
+      models: [...(
         base.models ?? this.modelCatalog.map((model) => model.id)
-      ),
+      )],
     };
     if (
       this.current.useStatefulResponses &&
@@ -215,11 +248,60 @@ export class ImageToolPolicy {
     return this.contextWindowSnapshot();
   }
 
+  /** Return the live Fast Mode default shared by all sessions. */
+  fastModeSnapshot(): FastModePreferences {
+    return {
+      fastModeDefault: this.current.fastModeDefault,
+    };
+  }
+
+  /** Persist the Fast Mode default toggle. */
+  async updateFastMode(
+    patch: Partial<FastModePreferences>
+  ): Promise<FastModePreferences> {
+    if (this.scope === undefined)
+      throw new Error("OpenAI Codex settings service is unavailable");
+    await this.scope.update(patch);
+    this.replace(this.scope.get());
+    return this.fastModeSnapshot();
+  }
+
+  /** Return the live provider proxy mode and explicit URL. */
+  proxySnapshot(): ProxyPreferences {
+    return {
+      proxyMode: this.current.proxyMode,
+      proxyUrl: this.current.proxyUrl,
+    };
+  }
+
+  /** Observe proxy changes so the transport can reconcile global mode. */
+  watchProxyPreferences(listener: () => void): () => void {
+    this.proxyWatchers.add(listener);
+    return () => {
+      this.proxyWatchers.delete(listener);
+    };
+  }
+
+  /** Persist a validated proxy mode or URL. */
+  async updateProxy(
+    patch: Partial<ProxyPreferences>
+  ): Promise<ProxyPreferences> {
+    if (this.scope === undefined)
+      throw new Error("OpenAI Codex settings service is unavailable");
+    const normalized =
+      patch.proxyUrl === undefined
+        ? patch
+        : { ...patch, proxyUrl: normalizeProxyUrl(patch.proxyUrl) };
+    await this.scope.update(normalized);
+    this.replace(this.scope.get());
+    return this.proxySnapshot();
+  }
+
   /** Return available models and the live discovery subset for the browser. */
   modelCatalogSnapshot(): ModelCatalogSettings {
     return {
       availableModels: this.modelCatalog.map((model) => ({ ...model })),
-      models: [...this.current.models],
+      models: this.normalizeModels(this.current.models),
     };
   }
 
@@ -230,7 +312,16 @@ export class ImageToolPolicy {
     if (this.scope === undefined)
       throw new Error("OpenAI Codex settings service is unavailable");
     if (patch.models === undefined) return this.modelCatalogSnapshot();
-    await this.scope.update({ models: this.normalizeModels(patch.models) });
+    const availableIds = new Set(this.modelCatalog.map((model) => model.id));
+    const unavailableSelections = [
+      ...new Set(this.current.models.filter((id) => !availableIds.has(id))),
+    ];
+    await this.scope.update({
+      models: [
+        ...this.normalizeModels(patch.models),
+        ...unavailableSelections,
+      ],
+    });
     this.replace(this.scope.get());
     return this.modelCatalogSnapshot();
   }
@@ -252,14 +343,22 @@ export class ImageToolPolicy {
       next.useStatefulResponses && !next.useWebSocketContextReuse
         ? { ...next, useWebSocketContextReuse: true }
         : next;
-    next = { ...next, models: this.normalizeModels(next.models) };
+    // Keep saved ids if the optional Codex cache is temporarily unavailable.
+    // Discovery filters against the current catalog without deleting preferences.
+    next = { ...next, models: [...next.models] };
     const imageChanged =
       next.modifyReadImage !== this.current.modifyReadImage ||
       next.shareImagegenWithOtherModels !==
         this.current.shareImagegenWithOtherModels;
+    const proxyChanged =
+      next.proxyMode !== this.current.proxyMode ||
+      next.proxyUrl !== this.current.proxyUrl;
     this.current = next;
     if (imageChanged) {
       for (const listener of this.imageWatchers) listener();
+    }
+    if (proxyChanged) {
+      for (const listener of this.proxyWatchers) listener();
     }
   }
 

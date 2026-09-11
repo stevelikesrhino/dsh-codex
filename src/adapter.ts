@@ -4,12 +4,12 @@ import { createModels } from "@earendil-works/pi-ai";
 import type {
   AuthContext,
   Context as PiContext,
-  Model,
+  FetchFunction,
   MutableModels,
   Provider,
   SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
+import { openaiCodexProvider } from "./oauth-provider.ts";
 import { resolveRetryPolicy } from "@deepseek-ai/dsh-llm";
 import type {
   GenerateOptions,
@@ -31,77 +31,85 @@ import type {
   ResponseApiPreferences,
 } from "./tool-policy.ts";
 import type { FastModeRegistry } from "./fast-mode.ts";
+import { OpenAICodexModelCatalog } from "./model-catalog.ts";
 
 const GPT_5_3_CODEX_SPARK = "gpt-5.3-codex-spark";
+const GPT_6_ASTRA = "gpt-6-astra";
 
-/**
- * Codex model served by the live pi.dev catalog before the pinned pi-ai
- * release listed it. Fields mirror the upstream record so a later pi-ai
- * release can own the same id without changing this overlay's behavior.
- */
-const GPT_6_ASTRA: Model<"openai-codex-responses"> = {
-  id: "gpt-6-astra",
-  name: "GPT-6 Astra",
-  api: "openai-codex-responses",
-  provider: "openai-codex",
-  baseUrl: "https://chatgpt.com/backend-api",
-  reasoning: true,
-  input: ["text", "image"],
-  cost: {
-    input: 10,
-    output: 50,
-    cacheRead: 1,
-    cacheWrite: 12.5,
-    tiers: [
-      {
-        inputTokensAbove: 272_000,
-        input: 20,
-        output: 75,
-        cacheRead: 2,
-        cacheWrite: 25,
-      },
-    ],
-  },
-  contextWindow: 272_000,
-  maxTokens: 128_000,
-  thinkingLevelMap: {
-    off: null,
-    minimal: "low",
-    low: "low",
-    medium: "medium",
-    high: "high",
-    xhigh: "xhigh",
-    max: "max",
-  },
-  compat: {
-    supportsOpenAIGrammarTools: true,
-    supportsAdditionalTools: true,
-    supportsToolSearch: true,
-  },
-};
+const OPENAI_CODEX_MODEL_ORDER = new Map<string, number>(
+  [
+    GPT_6_ASTRA,
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    GPT_5_3_CODEX_SPARK,
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+  ].map((id, index) => [id, index])
+);
 
-/**
- * Advertise plugin-owned Codex models the pinned pi-ai catalog does not list
- * yet. The overlay is idempotent: once a pi-ai release lists the same id, the
- * upstream record wins and this addition becomes a no-op.
- */
-function withOpenAICodexExtraModels(
-  provider: Provider<"openai-codex-responses">
-): Provider<"openai-codex-responses"> {
+/** Add Codex models released ahead of pi-ai's generated catalog, then order newest first. */
+function withOpenAICodexModelAdditions(provider: Provider): Provider {
   const getModels = provider.getModels;
   return {
     ...provider,
     getModels() {
-      const models = getModels.call(provider);
-      if (models.some((model) => model.id === GPT_6_ASTRA.id)) return models;
-      return [...models, GPT_6_ASTRA];
+      const models = [...getModels.call(provider)];
+      if (!models.some((model) => model.id === GPT_6_ASTRA)) {
+        const template =
+          models.find((model) => model.id === "gpt-5.6-sol") ?? models[0];
+        if (template !== undefined) {
+          models.push({
+            ...template,
+            id: GPT_6_ASTRA,
+            name: "GPT-6 Astra",
+            contextWindow: 1_050_000,
+            maxTokens: 128_000,
+            cost: {
+              input: 10,
+              output: 50,
+              cacheRead: 1,
+              cacheWrite: 12.5,
+              tiers: [
+                {
+                  inputTokensAbove: 272_000,
+                  input: 20,
+                  output: 75,
+                  cacheRead: 2,
+                  cacheWrite: 25,
+                },
+              ],
+            },
+          });
+        }
+      }
+      return models
+        .map((model, index) => ({ model, index }))
+        .sort((left, right) => {
+          const leftOrder =
+            OPENAI_CODEX_MODEL_ORDER.get(left.model.id) ?? Number.MAX_SAFE_INTEGER;
+          const rightOrder =
+            OPENAI_CODEX_MODEL_ORDER.get(right.model.id) ?? Number.MAX_SAFE_INTEGER;
+          return leftOrder - rightOrder || left.index - right.index;
+        })
+        .map(({ model }) => model);
     },
   };
 }
 
-/** Return a detached copy of the complete Codex model catalog. */
-export function openAICodexModelCatalog(): readonly ModelCatalogEntry[] {
-  return withOpenAICodexExtraModels(openaiCodexProvider())
+/** Keep bundled models as a fallback and discover new releases from Codex metadata. */
+export function createOpenAICodexModelProvider(requestFetch?: typeof globalThis.fetch): Provider {
+  const provider = withOpenAICodexModelAdditions(openaiCodexProvider(requestFetch));
+  const catalog = new OpenAICodexModelCatalog(provider.getModels());
+  return { ...provider, getModels: () => catalog.getModels() };
+}
+
+/** Return a detached copy of the current Codex model catalog for settings. */
+export function openAICodexModelCatalog(
+  provider: Provider = createOpenAICodexModelProvider()
+): readonly ModelCatalogEntry[] {
+  return provider
     .getModels()
     .map((model) => ({
       id: model.id,
@@ -254,6 +262,7 @@ type ImageCompatibleResolvedPiAiProviderProfile =
     maxRequestImageBytes: number;
     requestImagePixelBudget: number;
     requestImageMaxBytes: number;
+    modelErrors: ReadonlyMap<string, string>;
   };
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -327,7 +336,8 @@ function isPayloadRecord(value: unknown): value is Record<string, unknown> {
 /** Add the request-scoped Fast Mode hint without changing other payload fields. */
 export function withOpenAICodexFastMode(
   provider: Provider,
-  fastMode: FastModeRegistry | undefined
+  fastMode: FastModeRegistry | undefined,
+  fastModeDefault?: () => boolean
 ): Provider {
   const streamSimple = provider.streamSimple;
   return {
@@ -336,7 +346,8 @@ export function withOpenAICodexFastMode(
       const enabled =
         provider.id === OPENAI_CODEX_PROVIDER &&
         model.provider === OPENAI_CODEX_PROVIDER &&
-        fastMode?.isEnabled(options?.sessionId) === true;
+        (fastModeDefault?.() === true ||
+          fastMode?.isEnabled(options?.sessionId) === true);
       if (!enabled) return streamSimple.call(provider, model, context, options);
       const previousOnPayload = options?.onPayload;
       return streamSimple.call(provider, model, context, {
@@ -377,12 +388,30 @@ function withOpenAICodexContextWindow(
 
 function requestProvider(
   provider: Provider,
-  fastMode?: FastModeRegistry
+  fastMode?: FastModeRegistry,
+  fastModeDefault?: () => boolean,
+  requestFetch?: FetchFunction
 ): Provider {
+  const configured = withOpenAICodexFastMode(
+    provider,
+    fastMode,
+    fastModeDefault
+  );
+  const streamSimple = configured.streamSimple;
   return {
-    ...withOpenAICodexFastMode(provider, fastMode),
+    ...configured,
+    streamSimple(model, context, options) {
+      return streamSimple.call(configured, model, context, {
+        ...options,
+        ...(options?.fetch !== undefined
+          ? {}
+          : requestFetch === undefined
+            ? {}
+            : { fetch: requestFetch }),
+      });
+    },
     auth: {
-      ...provider.auth,
+      ...configured.auth,
       apiKey: {
         name: "OpenAI Codex OAuth bearer token",
         async resolve({ credential }) {
@@ -464,28 +493,39 @@ export function createOpenAICodexAdapter(
   fastMode?: FastModeRegistry,
   visibleModelIds?: () => readonly string[],
   contextWindow?: () => number | null | undefined,
-  overrideSparkContextWindow?: () => boolean | undefined
+  overrideSparkContextWindow?: () => boolean | undefined,
+  requestFetch?: FetchFunction,
+  fastModeDefault?: () => boolean,
+  modelProvider: Provider = createOpenAICodexModelProvider()
 ): PiAiAdapter {
   const provider = requestProvider(
-    withOpenAICodexExtraModels(openaiCodexProvider()),
-    fastMode
+    modelProvider,
+    fastMode,
+    fastModeDefault,
+    requestFetch
   );
-  const responses = new OpenAICodexResponseRuntime(responsePreferences);
+  const responses = new OpenAICodexResponseRuntime(
+    responsePreferences,
+    requestFetch
+  );
   const unset = Symbol("unset context window");
   let resolvedContextWindow: number | null | undefined | typeof unset = unset;
   let resolvedOverrideSparkContextWindow: boolean | undefined;
   let resolvedProfiles: Map<string, ResolvedPiAiProviderProfile> | undefined;
+  let resolvedModelCatalog: ReturnType<Provider["getModels"]> | undefined;
   const profiles = (): Map<string, ResolvedPiAiProviderProfile> => {
+    const nextModelCatalog = provider.getModels();
     const nextContextWindow = contextWindow?.();
     const nextOverrideSparkContextWindow = overrideSparkContextWindow?.();
     if (
       resolvedProfiles !== undefined &&
+      nextModelCatalog === resolvedModelCatalog &&
       nextContextWindow === resolvedContextWindow &&
       nextOverrideSparkContextWindow === resolvedOverrideSparkContextWindow
     )
       return resolvedProfiles;
     const configuredProvider = withOpenAICodexContextWindow(
-      provider,
+      { ...provider, getModels: () => nextModelCatalog },
       nextContextWindow,
       nextOverrideSparkContextWindow
     );
@@ -504,9 +544,11 @@ export function createOpenAICodexAdapter(
       requestImageMaxBytes: OPENAI_CODEX_PROMPT_IMAGE_INPUT_GUARD_BYTES,
       retryPolicy: OPENAI_CODEX_RETRY_POLICY,
       configuredMaxTokens: new Map(),
+      modelErrors: new Map(),
       piProvider: responses.wrap(configuredProvider),
     };
     resolvedContextWindow = nextContextWindow;
+    resolvedModelCatalog = nextModelCatalog;
     resolvedOverrideSparkContextWindow = nextOverrideSparkContextWindow;
     resolvedProfiles = new Map([[OPENAI_CODEX_PROVIDER, profile]]);
     return resolvedProfiles;

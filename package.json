@@ -1,7 +1,7 @@
 {
   "name": "dsh-codex",
   "description": "ChatGPT OAuth, Codex models, search, read_image URL support, and gpt-image-2 generation for DeepSeek Harness",
-  "version": "0.2.6",
+  "version": "0.2.9",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
@@ -68,6 +68,9 @@
       ],
       "platform": "web"
     }
+  },
+  "dependencies": {
+    "undici": "8.10.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
